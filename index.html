@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Validator PASETO v4.public - D4TI ULBI</title>
-  <meta name="description" content="Validator tanda tangan digital dokumen PASETO v4.public (Ed25519) menggunakan kunci publik di browser berbasis CrootJS.">
+  <meta name="description" content="Validator tanda tangan digital dokumen PASETO v4.public (Ed25519) menggunakan kunci publik resmi di browser berbasis CrootJS.">
 
   <script src="integrity.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/croot.css" integrity="sha384-cRZnPfqfc8A4ScSrJvvc1Fwf3GlvriswRMmEvn1/1pvlGcoEQHsPoukUjRuJpeKU" crossorigin="anonymous">
@@ -40,101 +40,51 @@
   <main class="container page-main">
     <section class="intro">
       <h1>Validator Tanda Tangan Digital</h1>
-      <p class="muted">Verifikasi tanda tangan digital dokumen berbasis QR Code dan PASETO <code>v4.public</code> (Ed25519) secara langsung di browser Anda tanpa mengirim kunci atau dokumen ke server mana pun.</p>
+      <p class="muted">Pindai QR Code dokumen atau unggah gambar QR untuk memverifikasi tanda tangan digital PASETO <code>v4.public</code> (Ed25519) secara langsung di browser dengan kunci publik resmi Prodi D4TI ULBI.</p>
     </section>
 
     <div id="validator-layout" class="validator-layout">
       <section id="form-card" class="card stack" aria-labelledby="judul-form">
         <div class="toolbar">
-          <h2 id="judul-form">Data Verifikasi</h2>
-          <div class="cluster">
-            <button type="button" id="load-sample-btn" class="secondary">Muat Contoh Uji</button>
-            <button type="button" id="reset-btn" class="ghost">Reset</button>
-          </div>
+          <h2 id="judul-form">Pindai QR Code Dokumen</h2>
+          <button type="button" id="reset-btn" class="ghost">Reset</button>
         </div>
 
-        <form id="validate-form" class="stack">
-          <p class="muted field-note">Verifikasi menggunakan kunci publik resmi Prodi D4TI ULBI yang tersimpan di aplikasi.</p>
+        <p class="muted field-note">Kunci publik resmi Prodi D4TI ULBI sudah tertanam di aplikasi. Hasil validasi muncul otomatis setelah QR Code terbaca.</p>
 
-          <div id="public-key-section" hidden>
-            <div>
-              <label for="public-key-input">Public Key (PASERK <code>k4.public.*</code>, Base64URL, atau Hex 32-byte)</label>
-              <input type="text" id="public-key-input" placeholder="k4.public...." autocomplete="off" spellcheck="false">
-            </div>
+        <div class="cluster">
+          <button type="button" id="camera-toggle-btn">
+            <span class="icon icon-search" aria-hidden="true"></span>Pindai Kamera
+          </button>
+          <label class="file-btn button secondary" for="qr-file-input">
+            <span class="icon icon-upload" aria-hidden="true"></span>Unggah Gambar QR (SVG/PNG/JPG)
+          </label>
+          <input type="file" id="qr-file-input" class="visually-hidden" accept="image/*,.svg">
+        </div>
 
-            <div class="cluster key-actions">
-              <input type="text" id="key-label-input" class="key-label-input" placeholder="Label kunci tersimpan (mis. D4TI 2026)">
-              <button type="button" id="save-key-btn" class="secondary">
-                <span class="icon icon-lock" aria-hidden="true"></span>Simpan Kunci
-              </button>
-              <select id="saved-keys-select" aria-label="Pilih public key tersimpan">
-                <option value="">-- Pilih kunci tersimpan --</option>
-              </select>
-              <button type="button" id="delete-key-btn" class="ghost" hidden>Hapus</button>
-            </div>
-          </div>
+        <div id="camera-wrap" class="camera-wrap" hidden>
+          <video id="camera-video" playsinline muted></video>
+          <p class="muted camera-hint">Arahkan QR Code ke kamera. Verifikasi berjalan otomatis saat QR terbaca.</p>
+        </div>
+        <canvas id="qr-canvas" class="visually-hidden"></canvas>
 
-          <div>
-            <label for="token-input">Token PASETO <code>v4.public.*</code> atau URL Validator</label>
-            <textarea id="token-input" rows="4" placeholder="v4.public.... atau https://repo.if.ulbi.ac.id/validate/#token=v4.public...." spellcheck="false" required></textarea>
-          </div>
-
-          <fieldset class="stack">
-            <legend>Ambil Token dari QR Code (Opsional)</legend>
-            <div class="cluster">
-              <button type="button" id="camera-toggle-btn" class="secondary">
-                <span class="icon icon-search" aria-hidden="true"></span>Pindai Kamera
-              </button>
-              <label class="file-btn button secondary" for="qr-file-input">
-                <span class="icon icon-upload" aria-hidden="true"></span>Unggah Gambar QR (SVG/PNG/JPG)
-              </label>
-              <input type="file" id="qr-file-input" class="visually-hidden" accept="image/*,.svg">
-            </div>
-            <div id="camera-wrap" class="camera-wrap" hidden>
-              <video id="camera-video" playsinline muted></video>
-              <p class="muted camera-hint">Arahkan QR Code ke kamera. Pemindaian berhenti otomatis saat token terbaca.</p>
-            </div>
-            <canvas id="qr-canvas" class="visually-hidden"></canvas>
-          </fieldset>
-
-          <div>
-            <label for="doc-file-input">Berkas Dokumen Asli untuk Uji Integritas SHA-256 (Opsional)</label>
-            <input type="file" id="doc-file-input">
-            <p id="doc-hash-status" class="muted field-note">Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam token.</p>
-          </div>
-
-          <details>
-            <summary>Opsi Lanjutan (Footer &amp; Implicit Assertion)</summary>
-            <div class="stack advanced-box">
-              <div>
-                <label for="footer-input">Footer yang Diharapkan (opsional)</label>
-                <input type="text" id="footer-input" placeholder='Contoh: d4if-ulbi-2026 atau {"kid":"..."}'>
-              </div>
-              <div>
-                <label for="implicit-input">Implicit Assertion (opsional)</label>
-                <input type="text" id="implicit-input" placeholder="Kosongkan jika tidak dipakai saat signing">
-              </div>
-            </div>
-          </details>
-
-          <div class="cluster">
-            <button type="submit" id="verify-btn">
-              <span class="icon icon-check" aria-hidden="true"></span>Verifikasi Tanda Tangan
-            </button>
-          </div>
-        </form>
+        <div>
+          <label for="doc-file-input">Berkas Dokumen Asli untuk Uji Integritas SHA-256 (Opsional)</label>
+          <input type="file" id="doc-file-input">
+          <p id="doc-hash-status" class="muted field-note">Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam QR Code.</p>
+        </div>
       </section>
 
       <section id="result-card" class="card stack" aria-labelledby="judul-hasil" aria-live="polite">
         <div class="toolbar">
           <h2 id="judul-hasil">Hasil Verifikasi</h2>
-          <button type="button" id="show-form-btn" class="secondary" hidden>Pindai / Input Token Lain</button>
+          <button type="button" id="show-form-btn" class="secondary" hidden>Pindai QR Lain</button>
         </div>
 
         <div id="result-placeholder" class="empty">
           <span class="icon icon-info" aria-hidden="true"></span>
-          <h3>Belum ada hasil</h3>
-          <p>Tempel token PASETO <code>v4.public</code> atau pindai QR Code dokumen untuk melihat hasil validasi otomatis.</p>
+          <h3>Menunggu QR Code Dokumen</h3>
+          <p>Pindai QR Code pada dokumen melalui kamera atau unggah gambar QR untuk melihat hasil validasi otomatis.</p>
         </div>
 
         <div id="result-panel" class="stack" hidden>

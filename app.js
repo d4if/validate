@@ -1,12 +1,11 @@
-import { getValue, hide, onChange, onClick, setInner, show } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/element.min.js";
+import { hide, onChange, onClick, setInner, show } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/element.min.js";
 import { getLocal, setLocal } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/storage.min.js";
 import { getHash, getQueryString, onHashChange } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/url.min.js";
 import { toastError, toastInfo, toastSuccess, toastWarning } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/toast.min.js";
 import { renderQR } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/qr.min.js";
 import { BUILTIN_PUBLIC_KEYS } from "./keys.js";
-import { createSampleSignedToken, readUntrustedKid, sha256ArrayBuffer, verifyPasetoV4Public } from "./paseto.js";
+import { readUntrustedKid, sha256ArrayBuffer, verifyPasetoV4Public } from "./paseto.js";
 
-const SAVED_KEYS_STORAGE = "d4if-validate-saved-keys";
 const THEME_KEY = "d4if-color-mode";
 
 let activeStream = null;
@@ -14,8 +13,8 @@ let scanFrameId = null;
 let lastDocHash = null;
 let lastDocName = null;
 let lastVerifiedClaims = null;
+let currentTokenInput = "";
 let overridePublicKey = null;
-let autoVerifyTimer = null;
 
 function escapeHTML(value) {
     return String(value)
@@ -44,105 +43,18 @@ function toggleColorMode() {
     applyColorMode(next);
 }
 
-function loadSavedKeys() {
-    const raw = getLocal(SAVED_KEYS_STORAGE);
-    if (!raw) return [];
-    try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        return [];
-    }
-}
-
-function writeSavedKeys(keys) {
-    setLocal(SAVED_KEYS_STORAGE, JSON.stringify(keys));
-}
-
-function renderSavedKeysSelect() {
-    const select = document.getElementById("saved-keys-select");
-    if (!select) return;
-    const keys = loadSavedKeys();
-    const currentVal = select.value;
-
-    select.innerHTML = '<option value="">-- Pilih kunci tersimpan --</option>' +
-        keys.map((entry, idx) => `<option value="${idx}">${escapeHTML(entry.label)}</option>`).join("");
-
-    if (currentVal !== "" && keys[Number(currentVal)]) {
-        select.value = currentVal;
-        document.getElementById("delete-key-btn").hidden = false;
-    } else {
-        document.getElementById("delete-key-btn").hidden = true;
-    }
-}
-
-function saveCurrentKey() {
-    const keyVal = getValue("public-key-input").trim();
-    const labelVal = getValue("key-label-input").trim() || `Kunci ${new Date().toLocaleDateString("id-ID")}`;
-    if (!keyVal) {
-        toastWarning("Isi public key terlebih dahulu sebelum menyimpan.", 2500);
-        return;
-    }
-    const keys = loadSavedKeys().filter((k) => k.key !== keyVal);
-    keys.unshift({ label: labelVal, key: keyVal });
-    writeSavedKeys(keys);
-    renderSavedKeysSelect();
-    document.getElementById("saved-keys-select").value = "0";
-    document.getElementById("delete-key-btn").hidden = false;
-    toastSuccess(`Public key "${labelVal}" disimpan.`, 2200);
-}
-
-function handleSavedKeySelect(el) {
-    const idx = el.value;
-    const deleteBtn = document.getElementById("delete-key-btn");
-    if (idx === "") {
-        deleteBtn.hidden = true;
-        return;
-    }
-    const keys = loadSavedKeys();
-    const chosen = keys[Number(idx)];
-    if (chosen) {
-        document.getElementById("public-key-input").value = chosen.key;
-        document.getElementById("key-label-input").value = chosen.label;
-        deleteBtn.hidden = false;
-    }
-}
-
-function deleteSelectedKey() {
-    const select = document.getElementById("saved-keys-select");
-    if (select.value === "") return;
-    const keys = loadSavedKeys();
-    keys.splice(Number(select.value), 1);
-    writeSavedKeys(keys);
-    select.value = "";
-    renderSavedKeysSelect();
-    toastInfo("Public key tersimpan dihapus.", 2000);
-}
-
 function resolveCandidateKeys(tokenInput) {
     if (overridePublicKey && overridePublicKey.key) {
         return [overridePublicKey];
     }
 
-    const manualKey = getValue("public-key-input").trim();
-    if (manualKey) {
-        return [{ id: "manual", label: "Kunci Input", key: manualKey }];
-    }
-
     const kid = readUntrustedKid(tokenInput);
-    const saved = loadSavedKeys().map((entry, idx) => ({
-        id: `saved-${idx}`,
-        label: entry.label || "Kunci Tersimpan",
-        key: entry.key
-    }));
-
-    const combined = [...BUILTIN_PUBLIC_KEYS, ...saved];
     if (!kid) {
-        return combined;
+        return BUILTIN_PUBLIC_KEYS;
     }
 
-    const exact = combined.filter((entry) => entry.id === kid);
-    const rest = combined.filter((entry) => entry.id !== kid);
+    const exact = BUILTIN_PUBLIC_KEYS.filter((entry) => entry.id === kid);
+    const rest = BUILTIN_PUBLIC_KEYS.filter((entry) => entry.id !== kid);
     return [...exact, ...rest];
 }
 
@@ -226,11 +138,9 @@ function updateHashBanner(claims) {
     }
 }
 
-async function runVerification() {
-    const token = getValue("token-input");
-    const expectedFooter = getValue("footer-input");
-    const implicitAssertion = getValue("implicit-input");
-    const candidates = resolveCandidateKeys(token);
+async function runVerification(tokenInput = currentTokenInput) {
+    currentTokenInput = String(tokenInput || "");
+    const candidates = resolveCandidateKeys(currentTokenInput);
 
     if (candidates.length === 0) {
         showVerificationError("Tidak ada public key terpercaya yang tersedia di aplikasi.");
@@ -244,10 +154,7 @@ async function runVerification() {
 
         for (const candidate of candidates) {
             try {
-                const attempt = await verifyPasetoV4Public(token, candidate.key, {
-                    expectedFooter,
-                    implicitAssertion
-                });
+                const attempt = await verifyPasetoV4Public(currentTokenInput, candidate.key);
                 if (attempt.signatureValid) {
                     matchedResult = attempt;
                     matchedCandidate = candidate;
@@ -350,9 +257,8 @@ async function handleQrImageUpload(el) {
         }
 
         overridePublicKey = null;
-        document.getElementById("token-input").value = code.data;
         toastSuccess("QR Code berhasil dibaca dari gambar.", 2200);
-        await runVerification();
+        await runVerification(code.data);
     } catch (err) {
         toastError(err.message, 3000);
     } finally {
@@ -395,10 +301,9 @@ function scanCameraFrame() {
     const code = decodeImageDataWithJsQR(imageData);
     if (code && code.data) {
         overridePublicKey = null;
-        document.getElementById("token-input").value = code.data;
         stopCamera();
         toastSuccess("QR Code berhasil dipindai dari kamera.", 2200);
-        runVerification();
+        runVerification(code.data);
         return;
     }
 
@@ -435,8 +340,7 @@ async function handleDocumentFileChange(el) {
     if (!file) {
         lastDocHash = null;
         lastDocName = null;
-        const defaultMsg = 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam token.';
-        setInner("doc-hash-status", defaultMsg);
+        setInner("doc-hash-status", 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam QR Code.');
         setInner("result-doc-hash-status", 'Hash SHA-256 berkas dihitung lokal di browser.');
         if (lastVerifiedClaims) updateHashBanner(lastVerifiedClaims);
         return;
@@ -469,38 +373,20 @@ function setQrResultMode(enabled, isEmbed = false) {
     }
 }
 
-function looksLikeCompleteTokenInput(raw) {
-    const trimmed = String(raw || "").trim();
-    if (!trimmed) return false;
-    if (/^v4\.public\.[^.\s]+\.[^.\s]+(?:\.[^.\s]+)?$/.test(trimmed)) return true;
-    return /(?:[?#&]|^)token=v4\.public\.[^&#\s]+/.test(trimmed) || /#v4\.public\.[^&#\s]+/.test(trimmed);
-}
-
-async function loadSample() {
-    const sample = await createSampleSignedToken();
-    overridePublicKey = {
-        id: "sample",
-        label: "Contoh Uji Lokal (Sementara)",
-        key: sample.publicKey
-    };
-    document.getElementById("token-input").value = sample.token;
-    document.getElementById("footer-input").value = "d4if-sample";
-    document.getElementById("implicit-input").value = "";
-    toastInfo("Contoh token uji lokal dimuat.", 2000);
-    await runVerification();
-}
-
 function resetForm() {
     stopCamera();
-    document.getElementById("validate-form").reset();
+    currentTokenInput = "";
     overridePublicKey = null;
     lastDocHash = null;
     lastDocName = null;
     lastVerifiedClaims = null;
-    setInner("doc-hash-status", 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam token.');
+    document.getElementById("doc-file-input").value = "";
+    document.getElementById("result-doc-file-input").value = "";
+    setInner("doc-hash-status", 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam QR Code.');
     setInner("result-doc-hash-status", 'Hash SHA-256 berkas dihitung lokal di browser.');
     document.getElementById("result-placeholder").hidden = false;
     document.getElementById("result-panel").hidden = true;
+    toastInfo("Hasil verifikasi direset.", 1800);
 }
 
 function hydrateFromUrl() {
@@ -518,15 +404,13 @@ function hydrateFromUrl() {
             label: "Public Key Parameter URL",
             key: keyParam
         };
-        document.getElementById("public-key-input").value = keyParam;
     } else {
         overridePublicKey = null;
     }
 
     if (tokenParam) {
-        document.getElementById("token-input").value = tokenParam;
         setQrResultMode(true, isEmbed);
-        runVerification();
+        runVerification(tokenParam);
     } else {
         setQrResultMode(false, isEmbed);
     }
@@ -534,39 +418,15 @@ function hydrateFromUrl() {
 
 function init() {
     applyColorMode(getLocal(THEME_KEY));
-    renderSavedKeysSelect();
 
     onClick("theme-toggle", toggleColorMode);
-    onClick("save-key-btn", saveCurrentKey);
-    onClick("delete-key-btn", deleteSelectedKey);
     onClick("camera-toggle-btn", toggleCamera);
-    onClick("load-sample-btn", loadSample);
     onClick("reset-btn", resetForm);
     onClick("show-form-btn", () => setQrResultMode(false, false));
 
-    onChange("saved-keys-select", handleSavedKeySelect);
     onChange("qr-file-input", handleQrImageUpload);
     onChange("doc-file-input", handleDocumentFileChange);
     onChange("result-doc-file-input", handleDocumentFileChange);
-
-    document.getElementById("token-input").addEventListener("input", (event) => {
-        if (overridePublicKey && overridePublicKey.id === "sample") {
-            overridePublicKey = null;
-            document.getElementById("footer-input").value = "";
-        }
-        clearTimeout(autoVerifyTimer);
-        const val = event.target.value;
-        if (looksLikeCompleteTokenInput(val)) {
-            autoVerifyTimer = setTimeout(() => {
-                runVerification();
-            }, 120);
-        }
-    });
-
-    document.getElementById("validate-form").addEventListener("submit", (event) => {
-        event.preventDefault();
-        runVerification();
-    });
 
     onHashChange(() => {
         hydrateFromUrl();
