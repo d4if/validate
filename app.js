@@ -8,6 +8,19 @@ import { hasSingleIncrementalEof, readUntrustedKid, sha256ArrayBuffer, verifyPas
 
 const THEME_KEY = "d4if-color-mode";
 
+const LECTURER_NAMES = {
+    RAN: "Roni Andarsyah, S.T., M.Kom.",
+    MYH: "M. Yusril Helmi Setyawan, S.Kom., M.Kom.",
+    RMA: "Rolly Maulana Awangga, S.T., M.T., CAIP.",
+    MNF: "Dr. Mohamad Nurkamal Fauzan, S.T., M.T.",
+    CPY: "Cahyo Prianto, S.Pd., M.T.",
+    SFP: "Dr. Syafrial Fachri Pane, S.T., M.T.I., EBDP., CDSP.",
+    RHA: "Roni Habibi, S.Kom., M.T.",
+    NHH: "Nisa Hanum Harani, S.Kom., M.T., CDSP.",
+    RNS: "Rd. Nuraini Siti Fathonah, S.S., M.Hum.",
+    NN257L: "Rolly Maulana Awangga, S.T., M.T., CAIP."
+};
+
 let activeStream = null;
 let scanFrameId = null;
 let lastDocBuffer = null;
@@ -59,6 +72,81 @@ function resolveCandidateKeys(tokenInput) {
     return [...exact, ...rest];
 }
 
+function formatIndonesianTimestamp(isoString) {
+    if (!isoString) return null;
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return String(isoString);
+
+    const dayDate = new Intl.DateTimeFormat("id-ID", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+    }).format(date);
+
+    const time = new Intl.DateTimeFormat("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+    }).format(date);
+
+    return `${dayDate} pukul ${time.replace(":", ".")}`;
+}
+
+function renderSignerCard(claims) {
+    const hashCard = document.getElementById("hash-card");
+    const hashLabel = document.getElementById("hash-card-label");
+    const hashValue = document.getElementById("hash-value-display");
+    const signerSection = document.getElementById("signer-section");
+    const integritySection = document.getElementById("integrity-section");
+
+    if (claims.doc_hash) {
+        hashLabel.textContent = "Nilai Hash";
+        hashValue.textContent = claims.doc_hash;
+        hashCard.hidden = false;
+    } else if (claims.jti) {
+        hashLabel.textContent = "ID Dokumen";
+        hashValue.textContent = claims.jti;
+        hashCard.hidden = false;
+    } else {
+        hashCard.hidden = true;
+    }
+
+    const signerCode = claims.signer ? String(claims.signer).trim() : "";
+    const fullName = (signerCode && LECTURER_NAMES[signerCode]) || signerCode || claims.iss || "Penanda Tangan Resmi";
+    document.getElementById("signer-fullname").textContent = fullName;
+
+    const detailRows = [];
+    if (signerCode) {
+        detailRows.push(["Kode Dosen", signerCode]);
+    }
+    if (claims.sub) {
+        detailRows.push(["Perihal", claims.sub]);
+    }
+    if (claims.jti) {
+        detailRows.push(["Nomor", claims.jti]);
+    }
+    if (claims.iss) {
+        detailRows.push(["Instansi", claims.iss]);
+    }
+    if (claims.iat) {
+        detailRows.push(["Ditandatangani pada", formatIndonesianTimestamp(claims.iat)]);
+    }
+
+    setInner(
+        "signer-details",
+        detailRows
+            .map(
+                ([label, value]) =>
+                    `<div class="signer-row"><dt>${escapeHTML(label)}</dt><span class="colon" aria-hidden="true">:</span><dd>${escapeHTML(value)}</dd></div>`
+            )
+            .join("")
+    );
+
+    signerSection.hidden = false;
+    integritySection.hidden = false;
+}
+
 function renderClaimsMeta(claims, footer, publicKeyPaserk, keyLabel) {
     const labels = [
         ["iss", "Penerbit (iss)"],
@@ -102,8 +190,11 @@ function renderClaimsMeta(claims, footer, publicKeyPaserk, keyLabel) {
 }
 
 function showVerificationError(message) {
-    document.getElementById("result-placeholder").hidden = true;
+    document.getElementById("form-card").hidden = true;
     document.getElementById("result-panel").hidden = false;
+    document.getElementById("hash-card").hidden = true;
+    document.getElementById("signer-section").hidden = true;
+    document.getElementById("integrity-section").hidden = true;
 
     const banner = document.getElementById("status-banner");
     banner.className = "alert danger";
@@ -113,6 +204,7 @@ function showVerificationError(message) {
     setInner("claims-meta", "");
     document.getElementById("qr-preview-wrap").hidden = true;
     setInner("raw-json-output", "");
+    document.getElementById("show-form-btn").hidden = document.body.classList.contains("embed-mode");
 }
 
 async function updateHashBanner(claims) {
@@ -127,13 +219,13 @@ async function updateHashBanner(claims) {
 
     if (!expected) {
         hashBanner.className = "alert warning";
-        hashBanner.innerHTML = `<span class="icon icon-warning" aria-hidden="true"></span> <strong>Catatan Integritas:</strong> Token tidak memuat klaim <code>doc_hash</code>. Hash berkas <code>${escapeHTML(lastDocName)}</code>: <code>${escapeHTML(lastDocHash)}</code>.`;
+        hashBanner.innerHTML = `<span class="icon icon-warning" aria-hidden="true"></span> <strong>Catatan Integritas:</strong> QR ini tidak memuat <code>doc_hash</code>. Hash berkas <code>${escapeHTML(lastDocName)}</code>: <code>${escapeHTML(lastDocHash)}</code>.`;
         return;
     }
 
     if (expected === lastDocHash.toLowerCase()) {
         hashBanner.className = "alert success";
-        hashBanner.innerHTML = `<span class="icon icon-check" aria-hidden="true"></span> <strong>Integritas Berkas Cocok:</strong> SHA-256 berkas <code>${escapeHTML(lastDocName)}</code> identik dengan tanda tangan digital.`;
+        hashBanner.innerHTML = `<span class="icon icon-check" aria-hidden="true"></span> <strong>Keaslian Berkas Terverifikasi:</strong> Berkas <code>${escapeHTML(lastDocName)}</code> cocok dengan tanda tangan digital.`;
         return;
     }
 
@@ -146,14 +238,14 @@ async function updateHashBanner(claims) {
             const baseHash = await sha256ArrayBuffer(bytes.subarray(0, baseLen));
             if (baseHash.toLowerCase() === expected && hasSingleIncrementalEof(bytes, baseLen)) {
                 hashBanner.className = "alert success";
-                hashBanner.innerHTML = `<span class="icon icon-check" aria-hidden="true"></span> <strong>Integritas Berkas Cocok:</strong> SHA-256 dokumen PDF dasar (<code>${escapeHTML(baseLen)}</code> byte sebelum stempel QR) pada <code>${escapeHTML(lastDocName)}</code> identik dengan tanda tangan digital.`;
+                hashBanner.innerHTML = `<span class="icon icon-check" aria-hidden="true"></span> <strong>Keaslian Berkas Terverifikasi:</strong> Dokumen PDF <code>${escapeHTML(lastDocName)}</code> cocok dengan nilai hash tanda tangan digital.`;
                 return;
             }
         }
     }
 
     hashBanner.className = "alert danger";
-    hashBanner.innerHTML = `<span class="icon icon-warning" aria-hidden="true"></span> <strong>Integritas Berkas Tidak Cocok:</strong> Berkas <code>${escapeHTML(lastDocName)}</code> telah berubah atau bukan dokumen yang ditandatangani.`;
+    hashBanner.innerHTML = `<span class="icon icon-warning" aria-hidden="true"></span> <strong>Keaslian Berkas Tidak Cocok:</strong> Berkas <code>${escapeHTML(lastDocName)}</code> telah diubah atau bukan naskah yang ditandatangani.`;
 }
 
 async function runVerification(tokenInput = currentTokenInput) {
@@ -187,12 +279,16 @@ async function runVerification(tokenInput = currentTokenInput) {
             throw lastError;
         }
 
-        document.getElementById("result-placeholder").hidden = true;
+        document.getElementById("form-card").hidden = true;
         document.getElementById("result-panel").hidden = false;
+        document.getElementById("show-form-btn").hidden = document.body.classList.contains("embed-mode");
 
         const banner = document.getElementById("status-banner");
         if (!matchedResult) {
             lastVerifiedClaims = null;
+            document.getElementById("hash-card").hidden = true;
+            document.getElementById("signer-section").hidden = true;
+            document.getElementById("integrity-section").hidden = true;
             banner.className = "alert danger";
             banner.innerHTML = '<span class="icon icon-warning" aria-hidden="true"></span> <strong>Tanda Tangan Tidak Valid:</strong> Signature Ed25519 tidak cocok dengan public key resmi atau token telah dimodifikasi.';
             document.getElementById("hash-banner").hidden = true;
@@ -211,10 +307,11 @@ async function runVerification(tokenInput = currentTokenInput) {
             toastWarning("Signature cocok, namun token kedaluwarsa atau belum berlaku.", 3500);
         } else {
             banner.className = "alert success";
-            banner.innerHTML = '<span class="icon icon-check" aria-hidden="true"></span> <strong>Tanda Tangan Digital Valid:</strong> Token PASETO <code>v4.public</code> terverifikasi secara kriptografis.';
+            banner.innerHTML = '<span class="icon icon-check" aria-hidden="true"></span> <strong>Tanda Tangan Digital Valid:</strong> Terverifikasi kriptografis (PASETO <code>v4.public</code>).';
             toastSuccess("Tanda tangan digital valid.", 2200);
         }
 
+        renderSignerCard(matchedResult.claims);
         await updateHashBanner(matchedResult.claims);
         renderClaimsMeta(
             matchedResult.claims,
@@ -299,7 +396,7 @@ function stopCamera() {
     const video = document.getElementById("camera-video");
     video.srcObject = null;
     hide("camera-wrap");
-    setInner("camera-toggle-btn", '<span class="icon icon-search" aria-hidden="true"></span>Pindai Kamera');
+    setInner("camera-toggle-btn", '<span class="icon icon-search" aria-hidden="true"></span>Pindai QR dengan Kamera');
 }
 
 function scanCameraFrame() {
@@ -353,14 +450,12 @@ async function toggleCamera() {
     }
 }
 
-async function handleDocumentFileChange(el) {
-    const file = el.files && el.files[0];
+async function processDocumentFile(file) {
     if (!file) {
         lastDocBuffer = null;
         lastDocHash = null;
         lastDocName = null;
-        setInner("doc-hash-status", 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam QR Code.');
-        setInner("result-doc-hash-status", 'Hash SHA-256 berkas dihitung lokal di browser.');
+        document.getElementById("result-doc-label").textContent = "Pilih berkas dokumen (PDF)";
         if (lastVerifiedClaims) await updateHashBanner(lastVerifiedClaims);
         return;
     }
@@ -368,32 +463,18 @@ async function handleDocumentFileChange(el) {
     lastDocBuffer = buffer;
     lastDocHash = await sha256ArrayBuffer(buffer);
     lastDocName = file.name;
-    const msg = `SHA-256 <code>${escapeHTML(file.name)}</code>: <code>${escapeHTML(lastDocHash)}</code>`;
-    setInner("doc-hash-status", msg);
-    setInner("result-doc-hash-status", msg);
+    document.getElementById("result-doc-label").textContent = file.name;
     if (lastVerifiedClaims) {
         await updateHashBanner(lastVerifiedClaims);
     }
 }
 
-function setQrResultMode(enabled, isEmbed = false) {
-    const layout = document.getElementById("validator-layout");
-    const formCard = document.getElementById("form-card");
-    const showFormBtn = document.getElementById("show-form-btn");
-
-    document.body.classList.toggle("embed-mode", Boolean(isEmbed));
-    if (enabled) {
-        formCard.hidden = true;
-        layout.classList.add("qr-mode");
-        showFormBtn.hidden = Boolean(isEmbed);
-    } else {
-        formCard.hidden = false;
-        layout.classList.remove("qr-mode");
-        showFormBtn.hidden = true;
-    }
+async function handleDocumentFileChange(el) {
+    const file = el.files && el.files[0];
+    await processDocumentFile(file);
 }
 
-function resetForm() {
+function showScannerView() {
     stopCamera();
     currentTokenInput = "";
     overridePublicKey = null;
@@ -401,13 +482,12 @@ function resetForm() {
     lastDocHash = null;
     lastDocName = null;
     lastVerifiedClaims = null;
-    document.getElementById("doc-file-input").value = "";
     document.getElementById("result-doc-file-input").value = "";
-    setInner("doc-hash-status", 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam QR Code.');
-    setInner("result-doc-hash-status", 'Hash SHA-256 berkas dihitung lokal di browser.');
-    document.getElementById("result-placeholder").hidden = false;
+    document.getElementById("result-doc-label").textContent = "Pilih berkas dokumen (PDF)";
+    document.getElementById("hash-banner").hidden = true;
     document.getElementById("result-panel").hidden = true;
-    toastInfo("Hasil verifikasi direset.", 1800);
+    document.getElementById("form-card").hidden = false;
+    document.getElementById("show-form-btn").hidden = true;
 }
 
 function hydrateFromUrl() {
@@ -418,6 +498,8 @@ function hydrateFromUrl() {
     const tokenParam = hashParams.get("token") || query.token || directHashToken;
     const keyParam = hashParams.get("key") || query.key;
     const isEmbed = query.embed === "1" || hashParams.get("embed") === "1";
+
+    document.body.classList.toggle("embed-mode", Boolean(isEmbed));
 
     if (keyParam) {
         overridePublicKey = {
@@ -430,11 +512,29 @@ function hydrateFromUrl() {
     }
 
     if (tokenParam) {
-        setQrResultMode(true, isEmbed);
         runVerification(tokenParam);
     } else {
-        setQrResultMode(false, isEmbed);
+        showScannerView();
     }
+}
+
+function wireDropzone(labelEl, onFile) {
+    if (!labelEl) return;
+    labelEl.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        labelEl.classList.add("is-dragover");
+    });
+    labelEl.addEventListener("dragleave", () => {
+        labelEl.classList.remove("is-dragover");
+    });
+    labelEl.addEventListener("drop", async (event) => {
+        event.preventDefault();
+        labelEl.classList.remove("is-dragover");
+        const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+        if (file) {
+            await onFile(file);
+        }
+    });
 }
 
 function init() {
@@ -442,12 +542,15 @@ function init() {
 
     onClick("theme-toggle", toggleColorMode);
     onClick("camera-toggle-btn", toggleCamera);
-    onClick("reset-btn", resetForm);
-    onClick("show-form-btn", () => setQrResultMode(false, false));
+    onClick("show-form-btn", () => {
+        showScannerView();
+        toastInfo("Siap memindai dokumen baru.", 1800);
+    });
 
     onChange("qr-file-input", handleQrImageUpload);
-    onChange("doc-file-input", handleDocumentFileChange);
     onChange("result-doc-file-input", handleDocumentFileChange);
+
+    wireDropzone(document.getElementById("pdf-dropzone-label"), processDocumentFile);
 
     onHashChange(() => {
         hydrateFromUrl();
