@@ -4,12 +4,13 @@ import { getHash, getQueryString, onHashChange } from "https://cdn.jsdelivr.net/
 import { toastError, toastInfo, toastSuccess, toastWarning } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/toast.min.js";
 import { renderQR } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/qr.min.js";
 import { BUILTIN_PUBLIC_KEYS } from "./keys.js";
-import { readUntrustedKid, sha256ArrayBuffer, verifyPasetoV4Public } from "./paseto.js";
+import { hasSingleIncrementalEof, readUntrustedKid, sha256ArrayBuffer, verifyPasetoV4Public } from "./paseto.js";
 
 const THEME_KEY = "d4if-color-mode";
 
 let activeStream = null;
 let scanFrameId = null;
+let lastDocBuffer = null;
 let lastDocHash = null;
 let lastDocName = null;
 let lastVerifiedClaims = null;
@@ -67,6 +68,7 @@ function renderClaimsMeta(claims, footer, publicKeyPaserk, keyLabel) {
         ["aud", "Penerima (aud)"],
         ["doc_name", "Nama Berkas"],
         ["doc_size", "Ukuran Berkas (byte)"],
+        ["doc_base_len", "Panjang Basis PDF (byte)"],
         ["doc_hash", "Hash Dokumen (SHA-256)"],
         ["iat", "Diterbitkan (iat)"],
         ["nbf", "Berlaku Mulai (nbf)"],
@@ -113,9 +115,9 @@ function showVerificationError(message) {
     setInner("raw-json-output", "");
 }
 
-function updateHashBanner(claims) {
+async function updateHashBanner(claims) {
     const hashBanner = document.getElementById("hash-banner");
-    if (!lastDocHash) {
+    if (!lastDocHash || !lastDocBuffer) {
         hashBanner.hidden = true;
         return;
     }
@@ -132,10 +134,26 @@ function updateHashBanner(claims) {
     if (expected === lastDocHash.toLowerCase()) {
         hashBanner.className = "alert success";
         hashBanner.innerHTML = `<span class="icon icon-check" aria-hidden="true"></span> <strong>Integritas Berkas Cocok:</strong> SHA-256 berkas <code>${escapeHTML(lastDocName)}</code> identik dengan tanda tangan digital.`;
-    } else {
-        hashBanner.className = "alert danger";
-        hashBanner.innerHTML = `<span class="icon icon-warning" aria-hidden="true"></span> <strong>Integritas Berkas Tidak Cocok:</strong> Berkas <code>${escapeHTML(lastDocName)}</code> telah berubah atau bukan dokumen yang ditandatangani.`;
+        return;
     }
+
+    const baseLen = claims && Number.isInteger(claims.doc_base_len) ? claims.doc_base_len : null;
+    if (baseLen && baseLen > 0) {
+        const bytes = new Uint8Array(lastDocBuffer);
+        const isPdf = bytes.length > baseLen &&
+            bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d;
+        if (isPdf) {
+            const baseHash = await sha256ArrayBuffer(bytes.subarray(0, baseLen));
+            if (baseHash.toLowerCase() === expected && hasSingleIncrementalEof(bytes, baseLen)) {
+                hashBanner.className = "alert success";
+                hashBanner.innerHTML = `<span class="icon icon-check" aria-hidden="true"></span> <strong>Integritas Berkas Cocok:</strong> SHA-256 dokumen PDF dasar (<code>${escapeHTML(baseLen)}</code> byte sebelum stempel QR) pada <code>${escapeHTML(lastDocName)}</code> identik dengan tanda tangan digital.`;
+                return;
+            }
+        }
+    }
+
+    hashBanner.className = "alert danger";
+    hashBanner.innerHTML = `<span class="icon icon-warning" aria-hidden="true"></span> <strong>Integritas Berkas Tidak Cocok:</strong> Berkas <code>${escapeHTML(lastDocName)}</code> telah berubah atau bukan dokumen yang ditandatangani.`;
 }
 
 async function runVerification(tokenInput = currentTokenInput) {
@@ -197,7 +215,7 @@ async function runVerification(tokenInput = currentTokenInput) {
             toastSuccess("Tanda tangan digital valid.", 2200);
         }
 
-        updateHashBanner(matchedResult.claims);
+        await updateHashBanner(matchedResult.claims);
         renderClaimsMeta(
             matchedResult.claims,
             matchedResult.footer,
@@ -338,21 +356,23 @@ async function toggleCamera() {
 async function handleDocumentFileChange(el) {
     const file = el.files && el.files[0];
     if (!file) {
+        lastDocBuffer = null;
         lastDocHash = null;
         lastDocName = null;
         setInner("doc-hash-status", 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam QR Code.');
         setInner("result-doc-hash-status", 'Hash SHA-256 berkas dihitung lokal di browser.');
-        if (lastVerifiedClaims) updateHashBanner(lastVerifiedClaims);
+        if (lastVerifiedClaims) await updateHashBanner(lastVerifiedClaims);
         return;
     }
     const buffer = await file.arrayBuffer();
+    lastDocBuffer = buffer;
     lastDocHash = await sha256ArrayBuffer(buffer);
     lastDocName = file.name;
     const msg = `SHA-256 <code>${escapeHTML(file.name)}</code>: <code>${escapeHTML(lastDocHash)}</code>`;
     setInner("doc-hash-status", msg);
     setInner("result-doc-hash-status", msg);
     if (lastVerifiedClaims) {
-        updateHashBanner(lastVerifiedClaims);
+        await updateHashBanner(lastVerifiedClaims);
     }
 }
 
@@ -377,6 +397,7 @@ function resetForm() {
     stopCamera();
     currentTokenInput = "";
     overridePublicKey = null;
+    lastDocBuffer = null;
     lastDocHash = null;
     lastDocName = null;
     lastVerifiedClaims = null;

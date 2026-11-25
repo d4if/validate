@@ -234,6 +234,14 @@ export async function sha256ArrayBuffer(buffer) {
     return bytesToHex(new Uint8Array(hashBuffer));
 }
 
+export function hasSingleIncrementalEof(bytes, baseLen) {
+    const tail = new TextDecoder("latin1").decode(bytes.subarray(baseLen));
+    const matches = [...tail.matchAll(/%%EOF/g)];
+    if (matches.length !== 1) return false;
+    const after = tail.slice(matches[0].index + 5);
+    return /^\s*$/.test(after);
+}
+
 export async function createSampleSignedToken() {
     const privKey = utils.randomPrivateKey();
     const pubKey = await getPublicKeyAsync(privKey);
