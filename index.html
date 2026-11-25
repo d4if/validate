@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Validator PASETO v4.public — D4TI ULBI</title>
+  <title>Validator PASETO v4.public - D4TI ULBI</title>
   <meta name="description" content="Validator tanda tangan digital dokumen PASETO v4.public (Ed25519) menggunakan kunci publik di browser berbasis CrootJS.">
 
   <script src="integrity.js"></script>
@@ -54,25 +54,29 @@
         </div>
 
         <form id="validate-form" class="stack">
-          <div>
-            <label for="public-key-input">Public Key (PASERK <code>k4.public.*</code>, Base64URL, atau Hex 32-byte)</label>
-            <input type="text" id="public-key-input" placeholder="k4.public...." autocomplete="off" spellcheck="false" required>
-          </div>
+          <p class="muted field-note">Verifikasi menggunakan kunci publik resmi Prodi D4TI ULBI yang tersimpan di aplikasi.</p>
 
-          <div class="cluster key-actions">
-            <input type="text" id="key-label-input" class="key-label-input" placeholder="Label kunci tersimpan (mis. D4TI 2026)">
-            <button type="button" id="save-key-btn" class="secondary">
-              <span class="icon icon-lock" aria-hidden="true"></span>Simpan Kunci
-            </button>
-            <select id="saved-keys-select" aria-label="Pilih public key tersimpan">
-              <option value="">-- Pilih kunci tersimpan --</option>
-            </select>
-            <button type="button" id="delete-key-btn" class="ghost" hidden>Hapus</button>
+          <div id="public-key-section" hidden>
+            <div>
+              <label for="public-key-input">Public Key (PASERK <code>k4.public.*</code>, Base64URL, atau Hex 32-byte)</label>
+              <input type="text" id="public-key-input" placeholder="k4.public...." autocomplete="off" spellcheck="false">
+            </div>
+
+            <div class="cluster key-actions">
+              <input type="text" id="key-label-input" class="key-label-input" placeholder="Label kunci tersimpan (mis. D4TI 2026)">
+              <button type="button" id="save-key-btn" class="secondary">
+                <span class="icon icon-lock" aria-hidden="true"></span>Simpan Kunci
+              </button>
+              <select id="saved-keys-select" aria-label="Pilih public key tersimpan">
+                <option value="">-- Pilih kunci tersimpan --</option>
+              </select>
+              <button type="button" id="delete-key-btn" class="ghost" hidden>Hapus</button>
+            </div>
           </div>
 
           <div>
             <label for="token-input">Token PASETO <code>v4.public.*</code> atau URL Validator</label>
-            <textarea id="token-input" rows="4" placeholder="v4.public.... atau https://.../validate/#token=v4.public...." spellcheck="false" required></textarea>
+            <textarea id="token-input" rows="4" placeholder="v4.public.... atau https://d4if.github.io/validate/#token=v4.public...." spellcheck="false" required></textarea>
           </div>
 
           <fieldset class="stack">
@@ -127,7 +131,7 @@
         <div id="result-placeholder" class="empty">
           <span class="icon icon-info" aria-hidden="true"></span>
           <h3>Belum ada hasil</h3>
-          <p>Masukkan public key dan token PASETO <code>v4.public</code> (atau pindai QR Code), lalu tekan <strong>Verifikasi Tanda Tangan</strong>.</p>
+          <p>Tempel token PASETO <code>v4.public</code> atau pindai QR Code dokumen, lalu tekan <strong>Verifikasi Tanda Tangan</strong>.</p>
         </div>
 
         <div id="result-panel" class="stack" hidden>
@@ -152,7 +156,7 @@
   </main>
 
   <footer class="container site-footer">
-    <p>Validator PASETO <code>v4.public</code> &mdash; Program Studi D4 Teknik Informatika ULBI</p>
+    <p>Validator PASETO <code>v4.public</code> - Program Studi D4 Teknik Informatika ULBI</p>
     <ul>
       <li><a href="https://repo.if.ulbi.ac.id/">Beranda D4TI</a></li>
       <li><a href="https://github.com/d4if/validate" target="_blank" rel="noopener noreferrer">GitHub @d4if/validate</a></li>

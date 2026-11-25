@@ -1,9 +1,10 @@
 import { getValue, hide, onChange, onClick, setInner, show } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/element.min.js";
 import { getLocal, setLocal } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/storage.min.js";
-import { getHash, getQueryString } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/url.min.js";
+import { getHash, getQueryString, onHashChange } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/url.min.js";
 import { toastError, toastInfo, toastSuccess, toastWarning } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/toast.min.js";
 import { renderQR } from "https://cdn.jsdelivr.net/gh/crootjs/lib@0.0.42/qr.min.js";
-import { createSampleSignedToken, sha256ArrayBuffer, verifyPasetoV4Public } from "./paseto.js";
+import { BUILTIN_PUBLIC_KEYS } from "./keys.js";
+import { createSampleSignedToken, readUntrustedKid, sha256ArrayBuffer, verifyPasetoV4Public } from "./paseto.js";
 
 const SAVED_KEYS_STORAGE = "d4if-validate-saved-keys";
 const THEME_KEY = "d4if-color-mode";
@@ -12,6 +13,7 @@ let activeStream = null;
 let scanFrameId = null;
 let lastDocHash = null;
 let lastDocName = null;
+let overridePublicKey = null;
 
 function escapeHTML(value) {
     return String(value)
@@ -57,6 +59,7 @@ function writeSavedKeys(keys) {
 
 function renderSavedKeysSelect() {
     const select = document.getElementById("saved-keys-select");
+    if (!select) return;
     const keys = loadSavedKeys();
     const currentVal = select.value;
 
@@ -114,7 +117,34 @@ function deleteSelectedKey() {
     toastInfo("Public key tersimpan dihapus.", 2000);
 }
 
-function renderClaimsMeta(claims, footer, publicKeyPaserk) {
+function resolveCandidateKeys(tokenInput) {
+    if (overridePublicKey && overridePublicKey.key) {
+        return [overridePublicKey];
+    }
+
+    const manualKey = getValue("public-key-input").trim();
+    if (manualKey) {
+        return [{ id: "manual", label: "Kunci Input", key: manualKey }];
+    }
+
+    const kid = readUntrustedKid(tokenInput);
+    const saved = loadSavedKeys().map((entry, idx) => ({
+        id: `saved-${idx}`,
+        label: entry.label || "Kunci Tersimpan",
+        key: entry.key
+    }));
+
+    const combined = [...BUILTIN_PUBLIC_KEYS, ...saved];
+    if (!kid) {
+        return combined;
+    }
+
+    const exact = combined.filter((entry) => entry.id === kid);
+    const rest = combined.filter((entry) => entry.id !== kid);
+    return [...exact, ...rest];
+}
+
+function renderClaimsMeta(claims, footer, publicKeyPaserk, keyLabel) {
     const labels = [
         ["iss", "Penerbit (iss)"],
         ["signer", "Penanda Tangan"],
@@ -146,6 +176,9 @@ function renderClaimsMeta(claims, footer, publicKeyPaserk) {
 
     if (footer) {
         rows.push(`<div><dt>Footer</dt><dd><code>${escapeHTML(footer)}</code></dd></div>`);
+    }
+    if (keyLabel) {
+        rows.push(`<div><dt>Otoritas Kunci</dt><dd>${escapeHTML(keyLabel)}</dd></div>`);
     }
     rows.push(`<div><dt>Public Key</dt><dd><code>${escapeHTML(publicKeyPaserk)}</code></dd></div>`);
 
@@ -192,24 +225,48 @@ function updateHashBanner(claims) {
 }
 
 async function runVerification() {
-    const publicKey = getValue("public-key-input");
     const token = getValue("token-input");
     const expectedFooter = getValue("footer-input");
     const implicitAssertion = getValue("implicit-input");
+    const candidates = resolveCandidateKeys(token);
+
+    if (candidates.length === 0) {
+        showVerificationError("Tidak ada public key terpercaya yang tersedia di aplikasi.");
+        return;
+    }
 
     try {
-        const result = await verifyPasetoV4Public(token, publicKey, {
-            expectedFooter,
-            implicitAssertion
-        });
+        let matchedResult = null;
+        let matchedCandidate = null;
+        let lastError = null;
+
+        for (const candidate of candidates) {
+            try {
+                const attempt = await verifyPasetoV4Public(token, candidate.key, {
+                    expectedFooter,
+                    implicitAssertion
+                });
+                if (attempt.signatureValid) {
+                    matchedResult = attempt;
+                    matchedCandidate = candidate;
+                    break;
+                }
+            } catch (err) {
+                lastError = err;
+            }
+        }
+
+        if (!matchedResult && lastError) {
+            throw lastError;
+        }
 
         document.getElementById("result-placeholder").hidden = true;
         document.getElementById("result-panel").hidden = false;
 
         const banner = document.getElementById("status-banner");
-        if (!result.signatureValid) {
+        if (!matchedResult) {
             banner.className = "alert danger";
-            banner.innerHTML = '<span class="icon icon-warning" aria-hidden="true"></span> <strong>Tanda Tangan Tidak Valid:</strong> Signature Ed25519 tidak cocok dengan public key ini atau token telah dimodifikasi.';
+            banner.innerHTML = '<span class="icon icon-warning" aria-hidden="true"></span> <strong>Tanda Tangan Tidak Valid:</strong> Signature Ed25519 tidak cocok dengan public key resmi atau token telah dimodifikasi.';
             document.getElementById("hash-banner").hidden = true;
             setInner("claims-meta", "");
             document.getElementById("qr-preview-wrap").hidden = true;
@@ -218,9 +275,9 @@ async function runVerification() {
             return;
         }
 
-        if (!result.timeValid) {
+        if (!matchedResult.timeValid) {
             banner.className = "alert warning";
-            banner.innerHTML = `<span class="icon icon-clock" aria-hidden="true"></span> <strong>Signature Valid, Namun Status Waktu Bermasalah:</strong> ${escapeHTML(result.timeIssues.join(" "))}`;
+            banner.innerHTML = `<span class="icon icon-clock" aria-hidden="true"></span> <strong>Signature Valid, Namun Status Waktu Bermasalah:</strong> ${escapeHTML(matchedResult.timeIssues.join(" "))}`;
             toastWarning("Signature cocok, namun token kedaluwarsa atau belum berlaku.", 3500);
         } else {
             banner.className = "alert success";
@@ -228,12 +285,17 @@ async function runVerification() {
             toastSuccess("Tanda tangan digital valid.", 2200);
         }
 
-        updateHashBanner(result.claims);
-        renderClaimsMeta(result.claims, result.footer, result.publicKeyPaserk);
-        setInner("raw-json-output", escapeHTML(JSON.stringify(result.claims, null, 2)));
+        updateHashBanner(matchedResult.claims);
+        renderClaimsMeta(
+            matchedResult.claims,
+            matchedResult.footer,
+            matchedResult.publicKeyPaserk,
+            matchedCandidate ? matchedCandidate.label : null
+        );
+        setInner("raw-json-output", escapeHTML(JSON.stringify(matchedResult.claims, null, 2)));
 
         try {
-            renderQR("token-qr-preview", result.rawToken, { ecc: "M", margin: 2, label: "QR Code Token PASETO" });
+            renderQR("token-qr-preview", matchedResult.rawToken, { ecc: "M", margin: 2, label: "QR Code Token PASETO" });
             document.getElementById("qr-preview-wrap").hidden = false;
         } catch {
             document.getElementById("qr-preview-wrap").hidden = true;
@@ -282,11 +344,10 @@ async function handleQrImageUpload(el) {
             throw new Error("QR Code tidak terdeteksi pada gambar tersebut.");
         }
 
+        overridePublicKey = null;
         document.getElementById("token-input").value = code.data;
         toastSuccess("QR Code berhasil dibaca dari gambar.", 2200);
-        if (getValue("public-key-input").trim()) {
-            await runVerification();
-        }
+        await runVerification();
     } catch (err) {
         toastError(err.message, 3000);
     } finally {
@@ -328,12 +389,11 @@ function scanCameraFrame() {
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const code = decodeImageDataWithJsQR(imageData);
     if (code && code.data) {
+        overridePublicKey = null;
         document.getElementById("token-input").value = code.data;
         stopCamera();
         toastSuccess("QR Code berhasil dipindai dari kamera.", 2200);
-        if (getValue("public-key-input").trim()) {
-            runVerification();
-        }
+        runVerification();
         return;
     }
 
@@ -381,7 +441,11 @@ async function handleDocumentFileChange(el) {
 
 async function loadSample() {
     const sample = await createSampleSignedToken();
-    document.getElementById("public-key-input").value = sample.publicKey;
+    overridePublicKey = {
+        id: "sample",
+        label: "Contoh Uji Lokal (Sementara)",
+        key: sample.publicKey
+    };
     document.getElementById("token-input").value = sample.token;
     document.getElementById("footer-input").value = "d4if-sample";
     document.getElementById("implicit-input").value = "";
@@ -392,6 +456,7 @@ async function loadSample() {
 function resetForm() {
     stopCamera();
     document.getElementById("validate-form").reset();
+    overridePublicKey = null;
     lastDocHash = null;
     lastDocName = null;
     setInner("doc-hash-status", 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam token.');
@@ -401,17 +466,25 @@ function resetForm() {
 
 function hydrateFromUrl() {
     const query = getQueryString();
-    const hashParams = new URLSearchParams(getHash());
-    const tokenParam = hashParams.get("token") || query.token;
+    const rawHash = getHash();
+    const hashParams = new URLSearchParams(rawHash);
+    const directHashToken = rawHash.startsWith("v4.public.") ? rawHash : null;
+    const tokenParam = hashParams.get("token") || query.token || directHashToken;
     const keyParam = hashParams.get("key") || query.key;
 
     if (keyParam) {
+        overridePublicKey = {
+            id: "url-param",
+            label: "Public Key Parameter URL",
+            key: keyParam
+        };
         document.getElementById("public-key-input").value = keyParam;
+    } else {
+        overridePublicKey = null;
     }
+
     if (tokenParam) {
         document.getElementById("token-input").value = tokenParam;
-    }
-    if (tokenParam && keyParam) {
         runVerification();
     }
 }
@@ -431,9 +504,20 @@ function init() {
     onChange("qr-file-input", handleQrImageUpload);
     onChange("doc-file-input", handleDocumentFileChange);
 
+    document.getElementById("token-input").addEventListener("input", () => {
+        if (overridePublicKey && overridePublicKey.id === "sample") {
+            overridePublicKey = null;
+            document.getElementById("footer-input").value = "";
+        }
+    });
+
     document.getElementById("validate-form").addEventListener("submit", (event) => {
         event.preventDefault();
         runVerification();
+    });
+
+    onHashChange(() => {
+        hydrateFromUrl();
     });
 
     hydrateFromUrl();

@@ -99,11 +99,32 @@ export function extractTokenString(rawInput) {
     if (trimmed.startsWith(PASETO_V4_PUBLIC_HEADER)) {
         return trimmed;
     }
-    const match = trimmed.match(/(?:[?#&]|^)token=(v4\.public\.[^&#\s]+)/);
+    const match = trimmed.match(/(?:[?#&]|^)token=([^&#\s]+)/);
     if (match) {
-        return decodeURIComponent(match[1]);
+        const decoded = decodeURIComponent(match[1]).trim();
+        if (decoded.startsWith(PASETO_V4_PUBLIC_HEADER)) {
+            return decoded;
+        }
+    }
+    const hashTokenMatch = trimmed.match(/#(v4\.public\.[^&#\s]+)/);
+    if (hashTokenMatch) {
+        return decodeURIComponent(hashTokenMatch[1]).trim();
     }
     throw new Error("Input harus berupa token v4.public.* atau URL yang mengandung parameter token=v4.public.*");
+}
+
+export function readUntrustedKid(tokenInput) {
+    try {
+        const token = extractTokenString(tokenInput);
+        const parts = token.split(".");
+        if (parts.length !== 4) return null;
+        const footerText = decoder.decode(base64UrlDecode(parts[3])).trim();
+        if (!footerText.startsWith("{")) return footerText || null;
+        const parsed = JSON.parse(footerText);
+        return parsed && typeof parsed.kid === "string" ? parsed.kid : null;
+    } catch {
+        return null;
+    }
 }
 
 function checkTemporalClaims(claims, nowMs = Date.now()) {
