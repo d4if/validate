@@ -1,3 +1,7 @@
+[hidden] {
+    display: none !important;
+}
+
 .brand {
     display: inline-flex;
     align-items: center;
@@ -25,6 +29,17 @@
     .validator-layout {
         grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
     }
+
+    .validator-layout.qr-mode {
+        grid-template-columns: minmax(0, 1fr);
+        max-width: 52rem;
+    }
+}
+
+.embed-mode header.nav,
+.embed-mode .intro,
+.embed-mode footer.site-footer {
+    display: none;
 }
 
 .key-actions {

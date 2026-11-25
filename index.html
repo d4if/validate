@@ -43,8 +43,8 @@
       <p class="muted">Verifikasi tanda tangan digital dokumen berbasis QR Code dan PASETO <code>v4.public</code> (Ed25519) secara langsung di browser Anda tanpa mengirim kunci atau dokumen ke server mana pun.</p>
     </section>
 
-    <div class="validator-layout">
-      <section class="card stack" aria-labelledby="judul-form">
+    <div id="validator-layout" class="validator-layout">
+      <section id="form-card" class="card stack" aria-labelledby="judul-form">
         <div class="toolbar">
           <h2 id="judul-form">Data Verifikasi</h2>
           <div class="cluster">
@@ -76,7 +76,7 @@
 
           <div>
             <label for="token-input">Token PASETO <code>v4.public.*</code> atau URL Validator</label>
-            <textarea id="token-input" rows="4" placeholder="v4.public.... atau https://d4if.github.io/validate/#token=v4.public...." spellcheck="false" required></textarea>
+            <textarea id="token-input" rows="4" placeholder="v4.public.... atau https://repo.if.ulbi.ac.id/validate/#token=v4.public...." spellcheck="false" required></textarea>
           </div>
 
           <fieldset class="stack">
@@ -125,13 +125,16 @@
         </form>
       </section>
 
-      <section class="card stack" aria-labelledby="judul-hasil" aria-live="polite">
-        <h2 id="judul-hasil">Hasil Verifikasi</h2>
+      <section id="result-card" class="card stack" aria-labelledby="judul-hasil" aria-live="polite">
+        <div class="toolbar">
+          <h2 id="judul-hasil">Hasil Verifikasi</h2>
+          <button type="button" id="show-form-btn" class="secondary" hidden>Pindai / Input Token Lain</button>
+        </div>
 
         <div id="result-placeholder" class="empty">
           <span class="icon icon-info" aria-hidden="true"></span>
           <h3>Belum ada hasil</h3>
-          <p>Tempel token PASETO <code>v4.public</code> atau pindai QR Code dokumen, lalu tekan <strong>Verifikasi Tanda Tangan</strong>.</p>
+          <p>Tempel token PASETO <code>v4.public</code> atau pindai QR Code dokumen untuk melihat hasil validasi otomatis.</p>
         </div>
 
         <div id="result-panel" class="stack" hidden>
@@ -140,6 +143,15 @@
 
           <h3>Detail Klaim Dokumen</h3>
           <dl id="claims-meta" class="meta"></dl>
+
+          <details id="result-integrity-details">
+            <summary>Uji Kecocokan Berkas Asli (SHA-256)</summary>
+            <div class="stack advanced-box">
+              <label for="result-doc-file-input">Pilih berkas dokumen asli untuk mencocokkan <code>doc_hash</code></label>
+              <input type="file" id="result-doc-file-input">
+              <p id="result-doc-hash-status" class="muted field-note">Hash SHA-256 berkas dihitung lokal di browser.</p>
+            </div>
+          </details>
 
           <div id="qr-preview-wrap" class="qr-preview-wrap" hidden>
             <h3>Pratinjau QR Code</h3>

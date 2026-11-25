@@ -13,7 +13,9 @@ let activeStream = null;
 let scanFrameId = null;
 let lastDocHash = null;
 let lastDocName = null;
+let lastVerifiedClaims = null;
 let overridePublicKey = null;
+let autoVerifyTimer = null;
 
 function escapeHTML(value) {
     return String(value)
@@ -265,6 +267,7 @@ async function runVerification() {
 
         const banner = document.getElementById("status-banner");
         if (!matchedResult) {
+            lastVerifiedClaims = null;
             banner.className = "alert danger";
             banner.innerHTML = '<span class="icon icon-warning" aria-hidden="true"></span> <strong>Tanda Tangan Tidak Valid:</strong> Signature Ed25519 tidak cocok dengan public key resmi atau token telah dimodifikasi.';
             document.getElementById("hash-banner").hidden = true;
@@ -274,6 +277,8 @@ async function runVerification() {
             toastError("Tanda tangan PASETO tidak valid.", 3000);
             return;
         }
+
+        lastVerifiedClaims = matchedResult.claims;
 
         if (!matchedResult.timeValid) {
             banner.className = "alert warning";
@@ -430,13 +435,45 @@ async function handleDocumentFileChange(el) {
     if (!file) {
         lastDocHash = null;
         lastDocName = null;
-        setInner("doc-hash-status", 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam token.');
+        const defaultMsg = 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam token.';
+        setInner("doc-hash-status", defaultMsg);
+        setInner("result-doc-hash-status", 'Hash SHA-256 berkas dihitung lokal di browser.');
+        if (lastVerifiedClaims) updateHashBanner(lastVerifiedClaims);
         return;
     }
     const buffer = await file.arrayBuffer();
     lastDocHash = await sha256ArrayBuffer(buffer);
     lastDocName = file.name;
-    setInner("doc-hash-status", `SHA-256 <code>${escapeHTML(file.name)}</code>: <code>${escapeHTML(lastDocHash)}</code>`);
+    const msg = `SHA-256 <code>${escapeHTML(file.name)}</code>: <code>${escapeHTML(lastDocHash)}</code>`;
+    setInner("doc-hash-status", msg);
+    setInner("result-doc-hash-status", msg);
+    if (lastVerifiedClaims) {
+        updateHashBanner(lastVerifiedClaims);
+    }
+}
+
+function setQrResultMode(enabled, isEmbed = false) {
+    const layout = document.getElementById("validator-layout");
+    const formCard = document.getElementById("form-card");
+    const showFormBtn = document.getElementById("show-form-btn");
+
+    document.body.classList.toggle("embed-mode", Boolean(isEmbed));
+    if (enabled) {
+        formCard.hidden = true;
+        layout.classList.add("qr-mode");
+        showFormBtn.hidden = Boolean(isEmbed);
+    } else {
+        formCard.hidden = false;
+        layout.classList.remove("qr-mode");
+        showFormBtn.hidden = true;
+    }
+}
+
+function looksLikeCompleteTokenInput(raw) {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) return false;
+    if (/^v4\.public\.[^.\s]+\.[^.\s]+(?:\.[^.\s]+)?$/.test(trimmed)) return true;
+    return /(?:[?#&]|^)token=v4\.public\.[^&#\s]+/.test(trimmed) || /#v4\.public\.[^&#\s]+/.test(trimmed);
 }
 
 async function loadSample() {
@@ -459,7 +496,9 @@ function resetForm() {
     overridePublicKey = null;
     lastDocHash = null;
     lastDocName = null;
+    lastVerifiedClaims = null;
     setInner("doc-hash-status", 'Jika dipilih, hash SHA-256 berkas akan dicocokkan dengan klaim <code>doc_hash</code> di dalam token.');
+    setInner("result-doc-hash-status", 'Hash SHA-256 berkas dihitung lokal di browser.');
     document.getElementById("result-placeholder").hidden = false;
     document.getElementById("result-panel").hidden = true;
 }
@@ -471,6 +510,7 @@ function hydrateFromUrl() {
     const directHashToken = rawHash.startsWith("v4.public.") ? rawHash : null;
     const tokenParam = hashParams.get("token") || query.token || directHashToken;
     const keyParam = hashParams.get("key") || query.key;
+    const isEmbed = query.embed === "1" || hashParams.get("embed") === "1";
 
     if (keyParam) {
         overridePublicKey = {
@@ -485,7 +525,10 @@ function hydrateFromUrl() {
 
     if (tokenParam) {
         document.getElementById("token-input").value = tokenParam;
+        setQrResultMode(true, isEmbed);
         runVerification();
+    } else {
+        setQrResultMode(false, isEmbed);
     }
 }
 
@@ -499,15 +542,24 @@ function init() {
     onClick("camera-toggle-btn", toggleCamera);
     onClick("load-sample-btn", loadSample);
     onClick("reset-btn", resetForm);
+    onClick("show-form-btn", () => setQrResultMode(false, false));
 
     onChange("saved-keys-select", handleSavedKeySelect);
     onChange("qr-file-input", handleQrImageUpload);
     onChange("doc-file-input", handleDocumentFileChange);
+    onChange("result-doc-file-input", handleDocumentFileChange);
 
-    document.getElementById("token-input").addEventListener("input", () => {
+    document.getElementById("token-input").addEventListener("input", (event) => {
         if (overridePublicKey && overridePublicKey.id === "sample") {
             overridePublicKey = null;
             document.getElementById("footer-input").value = "";
+        }
+        clearTimeout(autoVerifyTimer);
+        const val = event.target.value;
+        if (looksLikeCompleteTokenInput(val)) {
+            autoVerifyTimer = setTimeout(() => {
+                runVerification();
+            }, 120);
         }
     });
 
